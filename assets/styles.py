@@ -122,5 +122,42 @@ html,body,[data-testid="stAppViewContainer"],[data-testid="stMain"],
 /* ── text ── */
 h1,h2,h3,h4,h5,h6,p,span,div,label,
 .stMarkdown,.stText,[data-testid="stMarkdownContainer"]{color:#111 !important;}
+
+/* ── Dropdown / Selectbox list items ── */
+[data-baseweb="popover"] [role="option"],
+[data-baseweb="popover"] [role="listbox"] *,
+[data-baseweb="menu"] *,
+[data-baseweb="select"] [role="option"] {
+    background-color:#ffffff !important;
+    color:#111111 !important;}
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="menu"] li:hover {
+    background-color:#e8f0fe !important;
+    color:#1a73e8 !important;}
+
+/* ── Selectbox дотор сонгосон утга ── */
+[data-baseweb="select"] [data-testid="stSelectbox"] *,
+div[data-baseweb="select"] > div > div {
+    color:#111111 !important;
+    background-color:#ffffff !important;}
+
+/* ── Multiselect dropdown list ── */
+[data-baseweb="popover"] {
+    background-color:#ffffff !important;}
+[data-baseweb="popover"] * {
+    color:#111111 !important;}
+
+/* ── Main area selectbox (tab дотор) ── */
+.main [data-baseweb="select"] > div {
+    background-color:#ffffff !important;
+    color:#111111 !important;
+    border:1px solid #cccccc !important;
+    border-radius:6px !important;}
+.main [data-baseweb="select"] span {
+    color:#111111 !important;}
+.main [data-baseweb="popover"] [role="option"] {
+    background-color:#ffffff !important;
+    color:#111111 !important;}
+
 </style>
 """
