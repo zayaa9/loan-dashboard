@@ -269,8 +269,20 @@ def filter_customer_df(df_cust: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if f["location"] != "Бүгд" and "location_type" in out.columns:
         out = out[out["location_type"] == f["location"]]
 
+    # od_range filter — харилцагч түвшинд 0 хоногтой (хэвийн) харилцагчийг
+    # үргэлж оруулна. Slider-ийг "1–30" болгоход хэвийн харилцагчид шүүгдэж
+    # гарвал rate% тооцоо алдаатай болно (бүгд 100% болдог).
     if f["od_range"] and "max_overdue_day" in out.columns:
-        out = out[out["max_overdue_day"].between(*f["od_range"])]
+        lo, hi = f["od_range"]
+        if lo > 0:
+            # lo > 0: хэвийн (0 хоног) + slider хязгаарт багтах хэтрэлттэй
+            out = out[
+                (out["max_overdue_day"] == 0) |
+                (out["max_overdue_day"].between(lo, hi))
+            ]
+        else:
+            # lo == 0: хэвийн шүүлт
+            out = out[out["max_overdue_day"].between(lo, hi)]
 
     # status1 filter — харилцагч түвшинд O_active байсан эсэхээр шүүнэ
     if f["status1"]:
