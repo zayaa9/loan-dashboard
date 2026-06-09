@@ -348,7 +348,7 @@ def _render_salary(df: pd.DataFrame) -> None:
         yaxis=dict(**AXIS, title="Харилцагч"),
         yaxis2=dict(overlaying="y", side="right", title="Rate %",
             ticksuffix="%", tickfont=dict(color="#e24b4a",size=11),
-            gridcolor="rgba(0,0,0,0)", range=[0,25]))
+            gridcolor="rgba(0,0,0,0)", range=[0, max(sr["rate"].max()*1.6, 5)]))
     st.plotly_chart(fig3, use_container_width=True)
 
     # Box + тасралтгүй байдал
@@ -476,7 +476,7 @@ def _render_dti(df: pd.DataFrame) -> None:
                 yaxis=dict(**AXIS, title="Харилцагч"),
                 yaxis2=dict(overlaying="y", side="right", title="Rate %",
                     ticksuffix="%", tickfont=dict(color="#e24b4a",size=11),
-                    gridcolor="rgba(0,0,0,0)", range=[0,30]))
+                    gridcolor="rgba(0,0,0,0)", range=[0, max(dr["rate"].max()*1.6, 5)]))
             st.plotly_chart(fig3, use_container_width=True)
         with c4:
             st.markdown('<div class="sh">DTI тархалт — OD vs NOD</div>', unsafe_allow_html=True)
@@ -519,7 +519,7 @@ def _render_dti(df: pd.DataFrame) -> None:
             yaxis=dict(**AXIS, title="Харилцагч"),
             yaxis2=dict(overlaying="y", side="right", title="Rate %",
                 ticksuffix="%", tickfont=dict(color="#e24b4a",size=11),
-                gridcolor="rgba(0,0,0,0)", range=[0,30]))
+                gridcolor="rgba(0,0,0,0)", range=[0, max(lr["rate"].max()*1.6, 5)]))
         st.plotly_chart(fig5, use_container_width=True)
 
 
@@ -586,29 +586,56 @@ def _render_score(df: pd.DataFrame) -> None:
     sel2 = st.selectbox("Оноо сонгох (band):", list(avail.keys()), format_func=lambda x: avail.get(x,x), key="score_band_sel")
     if sel2 in df.columns and "has_overdue" in df.columns:
         mn, mx = df[sel2].min(), df[sel2].max()
-        step   = (mx - mn) / 8
-        bins   = [mn + i*step for i in range(9)]
-        labels_b = [f"{int(bins[i])}–{int(bins[i+1])}" for i in range(8)]
-        df = df.copy()
-        df["_tmp_band"] = pd.cut(df[sel2], bins=bins, labels=labels_b, include_lowest=True)
-        sb = df.groupby("_tmp_band", observed=True).agg(
-            нийт=(COL_CUST,"count"), хэтэрсэн=("has_overdue","sum"), avg_od=(OD,"mean")).reset_index()
-        sb["rate"] = (sb["хэтэрсэн"]/sb["нийт"]*100).round(1)
-        fig3 = go.Figure()
-        fig3.add_trace(go.Bar(x=sb["_tmp_band"].astype(str), y=sb["нийт"],
-            name="Нийт", marker_color="#1a73e8", opacity=0.6,
-            text=sb["нийт"], textposition="outside", yaxis="y1"))
-        fig3.add_trace(go.Scatter(x=sb["_tmp_band"].astype(str), y=sb["rate"],
-            name="Хэтрэлт %", mode="lines+markers+text",
-            line=dict(color="#e24b4a",width=2.5), marker=dict(size=9),
-            text=sb["rate"].astype(str)+"%",
-            textposition="top center", textfont=dict(color="#e24b4a",size=11), yaxis="y2"))
-        layout(fig3, height=360,
-            yaxis=dict(**AXIS, title="Харилцагч"),
-            yaxis2=dict(overlaying="y", side="right", title="Rate %",
-                ticksuffix="%", tickfont=dict(color="#e24b4a",size=11),
-                gridcolor="rgba(0,0,0,0)", range=[0,25]))
-        st.plotly_chart(fig3, use_container_width=True)
+        if mn == mx:
+            st.info("Оноогийн утга хангалтгүй — filter-г өргөсгөнө үү.")
+        else:
+            step     = (mx - mn) / 8
+            bins     = [mn + i*step for i in range(9)]
+            labels_b = [f"{int(bins[i])}–{int(bins[i+1])}" for i in range(8)]
+            df = df.copy()
+            df["_tmp_band"] = pd.cut(df[sel2], bins=bins, labels=labels_b, include_lowest=True)
+            sb = df.groupby("_tmp_band", observed=True).agg(
+                нийт=(COL_CUST,"count"), хэтэрсэн=("has_overdue","sum")).reset_index()
+            sb["rate"] = (sb["хэтэрсэн"] / sb["нийт"].replace(0, pd.NA) * 100).round(1).fillna(0)
+
+            # ── Динамик range: rate 0 байсан ч шугам харагдана ──────────────
+            rate_max   = sb["rate"].max()
+            y2_max     = max(rate_max * 1.6, 5)   # хамгийн багадаа 5% харуулна
+
+            fig3 = go.Figure()
+            fig3.add_trace(go.Bar(
+                x=sb["_tmp_band"].astype(str), y=sb["нийт"],
+                name="Нийт", marker_color="#1a73e8", opacity=0.6,
+                text=sb["нийт"], textposition="outside", yaxis="y1",
+            ))
+            fig3.add_trace(go.Scatter(
+                x=sb["_tmp_band"].astype(str), y=sb["rate"],
+                name="Хэтрэлт %", mode="lines+markers+text",
+                line=dict(color="#e24b4a", width=2.5),
+                marker=dict(size=9, color="#e24b4a", line=dict(color="#fff", width=1.5)),
+                text=[f"{v}%" for v in sb["rate"]],
+                textposition="top center",
+                textfont=dict(color="#e24b4a", size=11),
+                yaxis="y2",
+            ))
+            layout(fig3, height=360,
+                yaxis=dict(**AXIS, title="Харилцагч"),
+                yaxis2=dict(
+                    overlaying="y", side="right", title="Хэтрэлтийн rate %",
+                    ticksuffix="%", tickfont=dict(color="#e24b4a", size=11),
+                    title_font=dict(color="#e24b4a", size=12),
+                    gridcolor="rgba(0,0,0,0)",
+                    range=[0, y2_max],          # ← динамик range
+                ),
+                legend=dict(font=dict(color="#111",size=11),
+                    bgcolor="rgba(255,255,255,0.9)", bordercolor="#ddd", borderwidth=1,
+                    x=0.99, xanchor="right", y=0.99, yanchor="top"),
+                margin=dict(l=10, r=70, t=32, b=8),
+            )
+            # Rate бүгд 0 бол анхааруулга харуулна
+            if rate_max == 0:
+                st.info("💡 Сонгосон filter-д хэтрэлттэй харилцагч байхгүй байна — Rate % = 0%")
+            st.plotly_chart(fig3, use_container_width=True)
 
     # fin_score vs psy_score
     if "fin_score" in df.columns and "psy_score" in df.columns:
