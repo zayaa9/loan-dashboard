@@ -49,8 +49,9 @@ def render(df_cust: pd.DataFrame, selected: str) -> None:
         delta_color="off")
 
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
-    C1, C3, C6, C7, C8, C9, C10 = st.tabs([
+    C1, CSEG, C3, C6, C7, C8, C9, C10 = st.tabs([
         "📈 Тархалт",
+        "🧬 Хэтрэлтийн бүлгийн профайл",
         "🏷️ Категори",
         "💰 Цалингийн шинжилгээ",
         "🏷️ Зээлийн дүн & DTI",
@@ -59,13 +60,14 @@ def render(df_cust: pd.DataFrame, selected: str) -> None:
         "🗂️ Өгөгдөл",
     ])
 
-    with C1:  _render_distribution(df_cust, n_tot)
-    with C3:  _render_category(df_cust)
-    with C6:  _render_salary(df_cust)
-    with C7:  _render_dti(df_cust)
-    with C8:  _render_score(df_cust)
-    with C9:  _render_correlation(df_cust)
-    with C10: _render_data(df_cust, selected)
+    with C1:   _render_distribution(df_cust, n_tot)
+    with CSEG: _render_segment_profile(df_cust)
+    with C3:   _render_category(df_cust)
+    with C6:   _render_salary(df_cust)
+    with C7:   _render_dti(df_cust)
+    with C8:   _render_score(df_cust)
+    with C9:   _render_correlation(df_cust)
+    with C10:  _render_data(df_cust, selected)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +123,120 @@ def _render_distribution(df: pd.DataFrame, n_tot: int) -> None:
         seg["Хэтрэлт %"] = (seg["Хэтэрсэн"]/seg["Харилцагч"]*100).round(1)
         seg["Дундаж_MAX"] = seg["Дундаж_MAX"].round(1)
         st.dataframe(seg, use_container_width=True, height=260)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CSEG — Хэтрэлтийн бүлгийн профайл
+# ─────────────────────────────────────────────────────────────────────────────
+SEG_ORDER  = ["0 (хэвийн)", "1–15 хоног", "16–30 хоног", "30+ хоног"]
+SEG_COLORS = {"0 (хэвийн)": "#1d9e75", "1–15 хоног": "#f59e0b",
+              "16–30 хоног": "#dc2626", "30+ хоног": "#7f1d1d"}
+
+_SEG_NUM = {
+    "age": "Нас", "fin_score": "Санхүүгийн оноо", "psy_score": "Сэтгэл зүйн оноо",
+    "total_score_sr": "Нийт оноо (SR)", "slry_last_amt": "Сүүлийн цалин (₮)",
+    "slry_last_avg_6m": "6 сарын дундаж цалин (₮)", "slry_last_row_cnt_24m": "Цалингийн бичилт (24с)",
+    "zms_active_ln_cnt": "Идэвхтэй зээлийн тоо (ZMS)", "zms_monthly_payment": "Сарын зээлийн төлбөр (₮)",
+    "zms_closed_ln_total_amount": "Хаагдсан зээлийн нийт дүн (₮)",
+}
+_SEG_BOOL = {
+    "has_ios": "iOS хэрэглэгч", "is_bio_login": "Биометр нэвтрэлт",
+    "is_device_remember": "Төхөөрөмж санасан", "mobile_no": "Гар утасны дугаартай",
+    "slry_has_cont_salary_3m": "Тасралтгүй цалин 3 сар", "has_active_overdue_loan": "Идэвхтэй хэтрэлттэй зээл",
+}
+_SEG_CAT = {
+    "gender_label": "Жендэр", "marital_label": "Гэрлэлтийн байдал",
+    "edu_name": "Боловсрол", "location_type": "Байршил (УБ / Орон нутаг)",
+    "slry_cont_label": "Цалингийн тасралтгүй байдал",
+}
+
+
+def _seg_to_num(s: pd.Series) -> pd.Series:
+    """bool / 1-0 / текст утгыг 1.0 / 0.0 / NaN болгож хувиргана."""
+    def f(v):
+        if v in (True, 1, 1.0, "1", "1.0", "True", "TRUE", "YES", "Y", "T"):   return 1.0
+        if v in (False, 0, 0.0, "0", "0.0", "False", "FALSE", "NO", "N", "F"): return 0.0
+        return np.nan
+    return s.map(f)
+
+
+def _render_segment_profile(df: pd.DataFrame) -> None:
+    if OD not in df.columns:
+        st.info("Хэтрэлтийн өгөгдөл байхгүй байна.")
+        return
+
+    d = df.copy()
+    d["_seg"] = pd.cut(
+        d[OD].fillna(0).astype(float),
+        bins=[-1, 0, 15, 30, np.inf], labels=SEG_ORDER, right=True,
+    )
+
+    st.caption(
+        "Харилцагчдыг хамгийн их **идэвхтэй хэтрэлтийн хоногоор** 4 бүлэгт хувааж, "
+        "ямар шинж чанараараа ялгарч байгааг харьцуулав."
+    )
+
+    # ── Бүлгийн хэмжээ ────────────────────────────────────────────────────────
+    cnt = d["_seg"].value_counts().reindex(SEG_ORDER).fillna(0).astype(int)
+    cc1, cc2 = st.columns([2, 3])
+    with cc1:
+        tbl = pd.DataFrame({"Бүлэг": SEG_ORDER, "Харилцагч": cnt.values})
+        tbl["Хувь"] = (tbl["Харилцагч"] / max(tbl["Харилцагч"].sum(), 1) * 100).round(1).astype(str) + "%"
+        st.dataframe(tbl, hide_index=True, use_container_width=True)
+    with cc2:
+        figc = px.bar(x=SEG_ORDER, y=cnt.values, color=SEG_ORDER,
+            color_discrete_map=SEG_COLORS, text=cnt.values,
+            labels={"x": "Бүлэг", "y": "Харилцагчийн тоо"})
+        layout(figc, height=260, showlegend=False)
+        st.plotly_chart(figc, use_container_width=True)
+
+    # ── Тоон үзүүлэлтийн дундаж ───────────────────────────────────────────────
+    num_av = {k: v for k, v in _SEG_NUM.items() if k in d.columns}
+    if num_av:
+        st.markdown('<div class="sh">Тоон үзүүлэлтийн дундаж — бүлгээр</div>', unsafe_allow_html=True)
+        rows = []
+        for k, v in num_av.items():
+            means = pd.to_numeric(d[k], errors="coerce").groupby(d["_seg"], observed=False).mean().reindex(SEG_ORDER)
+            rows.append({"Үзүүлэлт": v, **{s: (round(means[s], 1) if pd.notna(means[s]) else "–") for s in SEG_ORDER}})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+        sel = st.selectbox("Тоон үзүүлэлт сонгож график харах:",
+            list(num_av.keys()), format_func=lambda x: num_av[x], key="seg_num_sel")
+        means = pd.to_numeric(d[sel], errors="coerce").groupby(d["_seg"], observed=False).mean().reindex(SEG_ORDER)
+        fign = px.bar(x=SEG_ORDER, y=means.values, color=SEG_ORDER,
+            color_discrete_map=SEG_COLORS,
+            text=[f"{v:,.1f}" if pd.notna(v) else "" for v in means.values],
+            labels={"x": "Бүлэг", "y": num_av[sel]})
+        fign.update_traces(textposition="outside")
+        layout(fign, height=320, showlegend=False)
+        st.plotly_chart(fign, use_container_width=True)
+
+    # ── Эзлэх хувь (тийм %) — boolean ─────────────────────────────────────────
+    bool_av = {k: v for k, v in _SEG_BOOL.items() if k in d.columns}
+    if bool_av:
+        st.markdown('<div class="sh">Эзлэх хувь (тийм / TRUE %) — бүлгээр</div>', unsafe_allow_html=True)
+        rows = []
+        for k, v in bool_av.items():
+            pct = (_seg_to_num(d[k]).groupby(d["_seg"], observed=False).mean() * 100).reindex(SEG_ORDER)
+            rows.append({"Үзүүлэлт": v, **{s: (f"{pct[s]:.1f}%" if pd.notna(pct[s]) else "–") for s in SEG_ORDER}})
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    # ── Ангиллын хувьсагчийн тархалт ──────────────────────────────────────────
+    cat_av = {k: v for k, v in _SEG_CAT.items() if k in d.columns}
+    if cat_av:
+        st.markdown('<div class="sh">Ангиллын хувьсагчийн тархалт — бүлгээр (%)</div>', unsafe_allow_html=True)
+        selc = st.selectbox("Ангиллын хувьсагч сонгох:",
+            list(cat_av.keys()), format_func=lambda x: cat_av[x], key="seg_cat_sel")
+        ct = pd.crosstab(d["_seg"], d[selc].astype(str), normalize="index").reindex(SEG_ORDER) * 100
+        long = ct.reset_index().melt(id_vars="_seg", var_name=cat_av[selc], value_name="Хувь")
+        figk = px.bar(long, x="_seg", y="Хувь", color=cat_av[selc], barmode="stack",
+            category_orders={"_seg": SEG_ORDER},
+            labels={"_seg": "Бүлэг", "Хувь": "Хувь (%)"})
+        layout(figk, height=360)
+        st.plotly_chart(figk, use_container_width=True)
+        st.dataframe(
+            ct.round(1).reset_index().rename(columns={"_seg": "Бүлэг"}),
+            use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

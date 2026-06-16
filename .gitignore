@@ -5,3 +5,6 @@ archive/
 __pycache__/
 *.pyc
 .DS_Store
+reports/
+dashboard_uploads/
+*.docx

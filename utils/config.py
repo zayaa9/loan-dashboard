@@ -38,7 +38,7 @@ CLR_BUCKET = ["#1d9e75","#84cc16","#f59e0b","#f97316","#ef4444","#dc2626","#7f1d
 
 # ── Customer attribute columns ────────────────────────────────────────────────
 CUST_ATTRS = [
-    "age","gender","marital_status","edu_name","location",
+    "age","gender","marital_status","edu_name","location","mobile_no",
     "has_ios","is_bio_login","fin_score","psy_score",
     "total_score_sr","slry_last_amt","slry_last_avg_6m",
     "zms_active_ln_cnt","is_device_remember","zms_monthly_payment",

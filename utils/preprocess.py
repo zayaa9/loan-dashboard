@@ -40,9 +40,18 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Boolean баганууд ──────────────────────────────────────────────────────
     def _to_bool(x):
+        # bool/тоон утга (Excel-ээс 1.0/0.0 float болж ирэхийг ч зөв таних)
+        if isinstance(x, (bool, np.bool_)):
+            return bool(x)
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            if pd.isna(x):
+                return np.nan
+            if x == 1: return True
+            if x == 0: return False
+            return np.nan
         s = str(x).strip().upper()
-        if s in ("TRUE", "1", "YES"):  return True
-        if s in ("FALSE", "0", "NO"): return False
+        if s in ("TRUE", "1", "1.0", "YES", "Y", "T"):  return True
+        if s in ("FALSE", "0", "0.0", "NO", "N", "F"): return False
         return np.nan
 
     for c in [COL_IS_OD, COL_ACT_OD]:
