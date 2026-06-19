@@ -916,5 +916,21 @@ def _render_data(df: pd.DataFrame, selected: str) -> None:
     st.markdown('<div class="sh">Харилцагчийн бүрэн өгөгдөл</div>', unsafe_allow_html=True)
     st.caption(f"Нийт **{len(df):,}** харилцагч · **{len(dcols)}** багана")
 
-    show_od = st.checkbox("Зөвхөн хэтрэлттэй харилцагчийг харуулах", value=False)
-    disp    = d
+    disp    = df[df["has_overdue"]] if show_od and "has_overdue" in df.columns else df
+
+    sort_col = "MAX хэтрэлт (хоног)" if "MAX хэтрэлт (хоног)" in dcols.values() else list(dcols.values())[0]
+    st.dataframe(
+        disp[list(dcols.keys())].rename(columns=dcols)
+            .sort_values(sort_col, ascending=False).reset_index(drop=True),
+        use_container_width=True, height=520)
+
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button("📥 Харилцагч CSV (бүх багана)",
+            df.to_csv(index=False).encode("utf-8-sig"),
+            f"customer_full_{selected}.csv", "text/csv", use_container_width=True)
+    with col_dl2:
+        od_only = df[df["has_overdue"]] if "has_overdue" in df.columns else df
+        st.download_button(f"📥 Хэтэрсэн харилцагч CSV ({len(od_only):,})",
+            od_only.to_csv(index=False).encode("utf-8-sig"),
+            f"customer_overdue_{selected}.csv", "text/csv", use_container_width=True)
