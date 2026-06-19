@@ -437,12 +437,15 @@ def _render_trend(selected: str) -> None:
             s1 = dp[COL_STATUS1].value_counts() if COL_STATUS1 in dp.columns else {}
             n  = len(dp)
             oad = dp.loc[dp[COL_STATUS1]=="O_active", COL_MAX_AOD] if COL_STATUS1 in dp.columns and COL_MAX_AOD in dp.columns else pd.Series()
+            cu = dp.groupby(COL_CUST)[COL_MAX_AOD].max() if (COL_CUST in dp.columns and COL_MAX_AOD in dp.columns) else pd.Series(dtype=float)
             rows.append({
                 "Он сар": p, "Нийт данс": n,
-                "C": int(s1.get("C",0)), "O_max": int(s1.get("O_max",0)),
                 "O_active": int(s1.get("O_active",0)),
-                "O_active %": round(s1.get("O_active",0)/max(n,1)*100, 1),
-                "Дундаж хэтрэлт": round(oad.mean(),2) if len(oad) else 0,
+                "O_active % (данс)": round(s1.get("O_active",0)/max(n,1)*100, 1),
+                "Харилцагч": int(cu.shape[0]),
+                "Хэтрэлттэй % (харилцагч)": round((cu>0).mean()*100, 1) if len(cu) else 0,
+                "30+ % (харилцагч)": round((cu>30).mean()*100, 2) if len(cu) else 0,
+                "Дундаж хэтрэлт (хон)": round(oad.mean(),2) if len(oad) else 0,
             })
         except Exception:
             pass
@@ -451,22 +454,28 @@ def _render_trend(selected: str) -> None:
     if len(tdf) >= 2:
         cur, prev = tdf.iloc[-1], tdf.iloc[-2]
         d1, d2, d3 = st.columns(3)
-        d1.metric("Энэ үеийн O_active", f"{cur['O_active']:,}")
-        d2.metric("Өмнөх үетэй зөрүү",  f"{cur['O_active']-prev['O_active']:+,}", delta_color="inverse")
-        d3.metric("O_active % зөрүү",    f"{cur['O_active %']-prev['O_active %']:+.1f}%", delta_color="inverse")
+        d1.metric("Хэтрэлт % (харилцагч)", f"{cur['Хэтрэлттэй % (харилцагч)']:.1f}%",
+            f"{cur['Хэтрэлттэй % (харилцагч)']-prev['Хэтрэлттэй % (харилцагч)']:+.1f}пп", delta_color="inverse")
+        d2.metric("O_active % (данс)", f"{cur['O_active % (данс)']:.1f}%",
+            f"{cur['O_active % (данс)']-prev['O_active % (данс)']:+.1f}пп", delta_color="inverse")
+        d3.metric("30+ % (харилцагч)", f"{cur['30+ % (харилцагч)']:.2f}%",
+            f"{cur['30+ % (харилцагч)']-prev['30+ % (харилцагч)']:+.2f}пп", delta_color="inverse")
         st.markdown("---")
 
         fig = go.Figure()
         fig.add_trace(go.Bar(x=tdf["Он сар"], y=tdf["O_active"],
-            name="O_active тоо", marker_color="rgba(226,75,74,.2)", yaxis="y2"))
-        fig.add_trace(go.Scatter(x=tdf["Он сар"], y=tdf["O_active %"],
-            name="O_active %", mode="lines+markers+text",
+            name="O_active тоо (данс)", marker_color="rgba(91,141,239,.25)", yaxis="y2"))
+        fig.add_trace(go.Scatter(x=tdf["Он сар"], y=tdf["Хэтрэлттэй % (харилцагч)"],
+            name="Хэтрэлт % (харилцагч)", mode="lines+markers+text",
             line=dict(color="#e24b4a",width=2.5), marker=dict(size=9),
-            text=tdf["O_active %"].astype(str)+"%",
+            text=tdf["Хэтрэлттэй % (харилцагч)"].astype(str)+"%",
             textposition="top center", textfont=dict(color="#e24b4a",size=11)))
+        fig.add_trace(go.Scatter(x=tdf["Он сар"], y=tdf["O_active % (данс)"],
+            name="O_active % (данс)", mode="lines+markers",
+            line=dict(color="#f59e0b",width=2,dash="dash"), marker=dict(size=7)))
         layout(fig, height=360,
-            yaxis=dict(**AXIS, title="O_active %"),
-            yaxis2=dict(overlaying="y", side="right", title="Тоо",
+            yaxis=dict(**AXIS, title="Хэтрэлт %"),
+            yaxis2=dict(overlaying="y", side="right", title="O_active тоо",
                         tickfont=dict(color="#bbb",size=10), gridcolor="rgba(0,0,0,0)"))
         st.plotly_chart(fig, use_container_width=True)
 
