@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 
 from utils.charts import layout, corr_box
@@ -49,9 +50,10 @@ def render(df_cust: pd.DataFrame, selected: str) -> None:
         delta_color="off")
 
     # ── Sub-tabs ──────────────────────────────────────────────────────────────
-    C1, CSEG, C3, C6, C7, C8, C9, C10 = st.tabs([
+    C1, CSEG, CSIX, C3, C6, C7, C8, C9, C10 = st.tabs([
         "📈 Тархалт",
         "🧬 Хэтрэлтийн бүлгийн профайл",
+        "🧩 6 сегмент",
         "🏷️ Категори",
         "💰 Цалингийн шинжилгээ",
         "🏷️ Зээлийн дүн & DTI",
@@ -62,6 +64,7 @@ def render(df_cust: pd.DataFrame, selected: str) -> None:
 
     with C1:   _render_distribution(df_cust, n_tot)
     with CSEG: _render_segment_profile(df_cust)
+    with CSIX: _render_six_seg(df_cust)
     with C3:   _render_category(df_cust)
     with C6:   _render_salary(df_cust)
     with C7:   _render_dti(df_cust)
@@ -237,6 +240,77 @@ def _render_segment_profile(df: pd.DataFrame) -> None:
         st.dataframe(
             ct.round(1).reset_index().rename(columns={"_seg": "Бүлэг"}),
             use_container_width=True, hide_index=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CSIX — 6 сегмент
+# ─────────────────────────────────────────────────────────────────────────────
+def _render_six_seg(df: pd.DataFrame) -> None:
+    if OD not in df.columns or "age" not in df.columns:
+        st.info("Шаардлагатай багана (нас / хэтрэлт) байхгүй байна.")
+        return
+    d = df.copy()
+    d["_ag"] = pd.cut(pd.to_numeric(d["age"], errors="coerce"), bins=[0, 29, 45, 200], labels=["17-29", "30-45", "46+"])
+    d["_g"] = d["gender_label"] if "gender_label" in d.columns else "–"
+    d["_seg"] = d["_ag"].astype(str) + " " + d["_g"].astype(str)
+    order = [f"{a} {gg}" for a in ["17-29", "30-45", "46+"] for gg in ["Эрэгтэй", "Эмэгтэй"]]
+    order = [s for s in order if (d["_seg"] == s).any()]
+    if not order:
+        st.info("Сегмент бүрдсэнгүй.")
+        return
+
+    st.caption("Харилцагчдыг нас (17–29 / 30–45 / 46+) болон хүйсээр 6 сегментэд хувааж, хэтрэлтийн бүтэц болон онооны хамаарлыг харуулав.")
+
+    # ── Хүснэгт: сегмент бүрийн хэтрэлтийн бүтэц ──
+    st.markdown('<div class="sh">Сегмент бүрийн хэтрэлтийн бүтэц</div>', unsafe_allow_html=True)
+    rows = []
+    for s in order:
+        a = d[d["_seg"] == s][OD]
+        rows.append({"Сегмент": s, "Тоо": len(a),
+                     "Хэтрээгүй %": round((a == 0).mean() * 100, 1),
+                     "1+ %": round((a > 0).mean() * 100, 1),
+                     "15+ %": round((a >= 15).mean() * 100, 1),
+                     "30+ %": round((a > 30).mean() * 100, 1)})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    # ── График тор: сегмент × онооны төрөл — хэтрэлт % (1+) онооны бүсээр ──
+    st.markdown('<div class="sh">Сегмент × онооны төрлөөр — хэтрэлт % (1+) онооны бүсээр</div>', unsafe_allow_html=True)
+    scores = [("total_score", "Нийт оноо", 330, 570), ("fin_score", "Санхүүгийн оноо", 150, 330), ("psy_score", "Сэтгэлзүйн оноо", 90, 270)]
+    scores = [s for s in scores if s[0] in d.columns]
+    if not scores:
+        return
+    specs = [[{"secondary_y": True}] * len(scores) for _ in range(len(order))]
+    fig = make_subplots(rows=len(order), cols=len(scores), specs=specs,
+                        column_titles=[nm for _, nm, _, _ in scores], row_titles=order,
+                        vertical_spacing=0.03, horizontal_spacing=0.07)
+    first = True
+    for i, seg in enumerate(order):
+        sub = d[d["_seg"] == seg]
+        for j, (col, nm, lo, hi) in enumerate(scores):
+            edges = list(range(lo, hi + 30, 30)); labels = [f"{edges[k]}-{edges[k+1]}" for k in range(len(edges) - 1)]
+            s = pd.to_numeric(sub[col], errors="coerce"); b = pd.cut(s, bins=edges, labels=labels, include_lowest=True)
+            t = sub.assign(_b=b).groupby("_b", observed=False).agg(
+                n=(OD, "count"),
+                od1=(OD, lambda x: (x > 0).mean() * 100 if len(x) else 0),
+                od15=(OD, lambda x: (x >= 15).mean() * 100 if len(x) else 0)).reindex(labels)
+            xb = [l.split("-")[0] for l in labels]
+            fig.add_trace(go.Bar(x=xb, y=t["n"].fillna(0).values, marker_color="#5b8def", opacity=.4,
+                                 name="Харилцагч (тоо)", showlegend=first), row=i + 1, col=j + 1, secondary_y=False)
+            fig.add_trace(go.Scatter(x=xb, y=t["od1"].fillna(0).round(1).values, mode="lines+markers",
+                                     line=dict(color="#e24b4a", width=1.5), marker=dict(size=4),
+                                     name="Хэтрэлт % (1+)", showlegend=first), row=i + 1, col=j + 1, secondary_y=True)
+            fig.add_trace(go.Scatter(x=xb, y=t["od15"].fillna(0).round(1).values, mode="lines+markers",
+                                     line=dict(color="#7c3aed", width=1.5, dash="dash"), marker=dict(size=4),
+                                     name="Хэтрэлт % (15+)", showlegend=first), row=i + 1, col=j + 1, secondary_y=True)
+            first = False
+    fig.update_yaxes(secondary_y=True, range=[0, 30], tickfont=dict(size=7))
+    fig.update_yaxes(secondary_y=False, tickfont=dict(size=7))
+    fig.update_xaxes(tickfont=dict(size=7))
+    fig.update_annotations(font=dict(size=10, color="#111"))
+    fig.update_layout(height=270 * len(order), margin=dict(l=10, r=70, t=70, b=10),
+                      plot_bgcolor="#fff", paper_bgcolor="#fff", font=dict(color="#111", size=9),
+                      barmode="overlay", legend=dict(orientation="h", y=1.05, x=0.5, xanchor="center"))
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -843,21 +917,4 @@ def _render_data(df: pd.DataFrame, selected: str) -> None:
     st.caption(f"Нийт **{len(df):,}** харилцагч · **{len(dcols)}** багана")
 
     show_od = st.checkbox("Зөвхөн хэтрэлттэй харилцагчийг харуулах", value=False)
-    disp    = df[df["has_overdue"]] if show_od and "has_overdue" in df.columns else df
-
-    sort_col = "MAX хэтрэлт (хоног)" if "MAX хэтрэлт (хоног)" in dcols.values() else list(dcols.values())[0]
-    st.dataframe(
-        disp[list(dcols.keys())].rename(columns=dcols)
-            .sort_values(sort_col, ascending=False).reset_index(drop=True),
-        use_container_width=True, height=520)
-
-    col_dl1, col_dl2 = st.columns(2)
-    with col_dl1:
-        st.download_button("📥 Харилцагч CSV (бүх багана)",
-            df.to_csv(index=False).encode("utf-8-sig"),
-            f"customer_full_{selected}.csv", "text/csv", use_container_width=True)
-    with col_dl2:
-        od_only = df[df["has_overdue"]] if "has_overdue" in df.columns else df
-        st.download_button(f"📥 Хэтэрсэн харилцагч CSV ({len(od_only):,})",
-            od_only.to_csv(index=False).encode("utf-8-sig"),
-            f"customer_overdue_{selected}.csv", "text/csv", use_container_width=True)
+    disp    = d

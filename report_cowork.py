@@ -28,6 +28,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 plt.rcParams["font.family"] = "DejaVu Sans"
 plt.rcParams["axes.unicode_minus"] = False
 
@@ -111,6 +113,10 @@ def compute(df: pd.DataFrame) -> dict:
         s = pd.to_numeric(cust[c], errors="coerce")
         S[c + "_mean"] = s.mean(); S[c + "_min"] = s.min(); S[c + "_max"] = s.max(); S[c + "_med"] = s.median()
     S["corr"] = oa[["total_score", OD]].dropna().corr().iloc[0, 1] if len(oa) > 2 else float("nan")
+    oa15 = oa[oa[OD] >= 15]; oa30 = oa[oa[OD] >= 30]
+    S["corr15"] = oa15[["total_score", OD]].dropna().corr().iloc[0, 1] if len(oa15) > 2 else float("nan")
+    S["corr30"] = oa30[["total_score", OD]].dropna().corr().iloc[0, 1] if len(oa30) > 2 else float("nan")
+    S["corr15_n"] = len(oa15); S["corr30_n"] = len(oa30)
     od = cust[cust["has_od"]]; nod = cust[~cust["has_od"]]
     S["cmp"] = {}
     for c in ["total_score", "fin_score", "psy_score", "age", "slry_last_amt", "slry_last_avg_6m", "zms_active_ln_cnt", "zms_monthly_payment"]:
@@ -150,35 +156,55 @@ def _assess_od(p):
     if p < 13: return "дунд зэргийн түвшинд"
     if p < 20: return "нэлээд өндөр, анхаарал шаардсан түвшинд"
     return "өндөр, эрсдэл ихтэй түвшинд"
+
+
 def _assess_c30(p):
     if p < 1:  return "маш бага"
     if p < 3:  return "бага"
     if p < 6:  return "анхаарал татахуйц"
     return "өндөр"
+
+
 def _assess_corr(r):
-    a=abs(r)
-    if a<0.05: return "маш сул"
-    if a<0.15: return "сул"
-    if a<0.30: return "дунд зэргийн"
+    a = abs(r)
+    if a < 0.05: return "маш сул"
+    if a < 0.15: return "сул"
+    if a < 0.30: return "дунд зэргийн"
     return "харьцангуй хүчтэй"
+
+
 def _assess_short(p):
-    if p>=60: return "дийлэнх нь богино (≤5 хоног) хэтрэлт бөгөөд эргэн төлөлтийн зан төлөв эерэг"
-    if p>=45: return "ихэнх нь богино хугацааны хэтрэлт"
+    if p >= 60: return "дийлэнх нь богино (≤5 хоног) хэтрэлт бөгөөд эргэн төлөлтийн зан төлөв эерэг"
+    if p >= 45: return "ихэнх нь богино хугацааны хэтрэлт"
     return "богино болон урт хугацааны хэтрэлт харьцангуй жигд тархсан"
-def _trend(cur,prev,unit="пп"):
-    d=cur-prev
-    if abs(d)<0.3: return f"өмнөх үетэй харьцуулахад бараг тогтвортой ({prev:.1f} → {cur:.1f})"
-    return f"өмнөх үеэс {abs(d):.1f}{unit}-ээр {'нэмэгдсэн' if d>0 else 'буурсан'} ({prev:.1f} → {cur:.1f})"
-def _best_discriminator(tspr,fspr,pspr):
-    return max({"нийт оноо":tspr,"санхүүгийн оноо":fspr,"сэтгэлзүйн оноо":pspr}.items(),key=lambda kv:kv[1])[0]
+
+
+def _trend(cur, prev, unit="пп"):
+    d = cur - prev
+    if abs(d) < 0.3:
+        return f"өмнөх үетэй харьцуулахад бараг тогтвортой ({prev:.1f} → {cur:.1f})"
+    return f"өмнөх үеэс {abs(d):.1f}{unit}-ээр {'нэмэгдсэн' if d > 0 else 'буурсан'} ({prev:.1f} → {cur:.1f})"
+
+
+def _best_discriminator(tspr, fspr, pspr):
+    return max({"нийт оноо": tspr, "санхүүгийн оноо": fspr, "сэтгэлзүйн оноо": pspr}.items(), key=lambda kv: kv[1])[0]
+
+
 def _prev_summary(current_filename):
-    files=[f for f in glob.glob(str(ARCHIVE_DIR/"*.parquet")) if os.path.basename(f)!=current_filename]
-    if not files: return None
-    path=max(files,key=os.path.getmtime)
+    """archive дахь өмнөх үеийн (хоёр дахь шинэ) parquet-аас гол үзүүлэлт авна. Үгүй бол None."""
+    files = [f for f in glob.glob(str(ARCHIVE_DIR / "*.parquet")) if os.path.basename(f) != current_filename]
+    if not files:
+        return None
+    path = max(files, key=os.path.getmtime)
     try:
-        dfp=pd.read_parquet(path); g=dfp.groupby("cust_code"); cu=g.agg(m=("max_active_overdue_day","max")).reset_index()
-        return {"name":os.path.basename(path).replace(".parquet",""),"od_pct":(cu["m"]>0).mean()*100,"c30_pct":(cu["m"]>30).mean()*100,"score":pd.to_numeric(g["total_score"].first(),errors="coerce").mean()}
-    except Exception: return None
+        dfp = pd.read_parquet(path)
+        g = dfp.groupby("cust_code"); cu = g.agg(m=("max_active_overdue_day", "max")).reset_index()
+        return {"name": os.path.basename(path).replace(".parquet", ""),
+                "od_pct": (cu["m"] > 0).mean() * 100,
+                "c30_pct": (cu["m"] > 30).mean() * 100,
+                "score": pd.to_numeric(g["total_score"].first(), errors="coerce").mean()}
+    except Exception:
+        return None
 
 
 # ── Графикууд ─────────────────────────────────────────────────────────────────
@@ -388,6 +414,86 @@ def _add_corr_appendix(doc, S):
                     p.add_run().add_break(); p.add_run(ln).font.size = Pt(7.5)
 
 
+def _add_group_profile(doc, S):
+    """Хэтрээгүй / +1 / +30 бүлгийн ерөнхий зан төлөвийн харьцуулалт (динамик тайлбар)."""
+    cu = S["_cust"]
+    G0 = cu[cu["max_aod"] == 0]; G1 = cu[cu["max_aod"] >= 1]; G30 = cu[cu["max_aod"] >= 30]
+
+    def mn(G, c):
+        return pd.to_numeric(G[c], errors="coerce").mean() if c in G.columns else float("nan")
+
+    def pc(G, c):
+        return _b2n(G[c]).mean() * 100 if c in G.columns else float("nan")
+
+    od = (cu["max_aod"] > 0).astype(float)
+    z = pd.to_numeric(cu["zms_active_ln_cnt"], errors="coerce") if "zms_active_ln_cnt" in cu.columns else None
+    zcorr = np.corrcoef(z.fillna(z.mean()), od)[0, 1] if (z is not None and z.std() > 0) else float("nan")
+
+    sec = doc.add_section(WD_SECTION.NEW_PAGE)
+    sec.orientation = WD_ORIENT.PORTRAIT
+    sec.page_width = Inches(8.5); sec.page_height = Inches(11)
+    sec.left_margin = Inches(1); sec.right_margin = Inches(1); sec.top_margin = Inches(1); sec.bottom_margin = Inches(1)
+
+    _H1(doc, "Хавсралт-2. Хэтрээгүй / +1 / +30 бүлгийн ерөнхий зан төлөвийн харьцуулалт")
+    _BODY(doc, f"Хэтрэлт хүндрэх тусам санхүүгийн чадавхын бараг бүх үзүүлэлт тогтмол буурах хандлагатай байна: нийт оноо {mn(G0,'total_score'):.0f} → {mn(G1,'total_score'):.0f} → {mn(G30,'total_score'):.0f}, санхүүгийн оноо {mn(G0,'fin_score'):.0f} → {mn(G1,'fin_score'):.0f} → {mn(G30,'fin_score'):.0f}, сүүлийн цалин {mn(G0,'slry_last_amt')/1e6:.2f} → {mn(G1,'slry_last_amt')/1e6:.2f} → {mn(G30,'slry_last_amt')/1e6:.2f} сая ₮.")
+    _BODY(doc, f"Хамгийн тод ялгарах хоёр шинж нь: (1) сүүлийн 3 сарын тасралтгүй цалинтай харилцагчийн хувь хэтрээгүй бүлэгт {pc(G0,'slry_has_cont_salary_3m'):.1f}% байсан бол +30 бүлэгт {pc(G30,'slry_has_cont_salary_3m'):.1f}% болж огцом буурсан нь орлогын тогтворгүй байдал өндөр эрсдэлтэй шууд холбоотой; (2) эрэгтэй харилцагчийн эзлэх хувь {pc(G0,'gender'):.1f}% → {pc(G1,'gender'):.1f}% → {pc(G30,'gender'):.1f}% болж огцом нэмэгдсэн нь эрэгтэйчүүд эрсдэл өндөртэйг харуулна. Биометр нэвтрэлт идэвхжүүлсэн хувь хэтэрсэн бүлгүүдэд бага ({pc(G0,'is_bio_login'):.1f}% → {pc(G1,'is_bio_login'):.1f}% → {pc(G30,'is_bio_login'):.1f}%).")
+    _BODY(doc, f"Бусад зээлийн (ЗМС) мэдээллийн хувьд хэтрэлт хүндрэх тусам идэвхтэй зээлийн тоо ({mn(G0,'zms_active_ln_cnt'):.1f} → {mn(G30,'zms_active_ln_cnt'):.1f}), сарын төлбөр ({mn(G0,'zms_monthly_payment')/1e3:.0f} → {mn(G30,'zms_monthly_payment')/1e3:.0f} мянга) болон хаагдсан зээлийн нийт дүн ({mn(G0,'zms_closed_ln_total_amount')/1e6:.1f} → {mn(G30,'zms_closed_ln_total_amount')/1e6:.1f} сая ₮) бүгд буурч, хэтрэлттэй корреляц {zcorr:+.2f} орчим сул сөрөг байна. Энэ нь хэтэрсэн харилцагчид бусад зээлээр хэт ачаалалтай байгаагаас бус, харин зээлийн түүх нимгэн, тогтсон зээлийн харилцаа сул байгааг илтгэнэ — баялаг зээлийн түүхтэй харилцагчид эрсдэл бага байна.")
+    _BODY(doc, f"Сонирхолтой нь сэтгэлзүйн оноо хэтрэлт хүндрэх тусам буурахгүй, бүр бага зэрэг нэмэгдэж ({mn(G0,'psy_score'):.1f} → {mn(G30,'psy_score'):.1f}) байгаа нь сэтгэлзүйн оноо хэтрэлтийг сул ялгадаг өмнөх дүгнэлтийг баталж байна.")
+
+
+def _seg_grid(cu, order):
+    scores = [("total_score", "Нийт оноо", 330, 570), ("fin_score", "Санхүүгийн оноо", 150, 330), ("psy_score", "Сэтгэлзүйн оноо", 90, 270)]
+    fig, axes = plt.subplots(len(order), 3, figsize=(13, 16))
+    for i, seg in enumerate(order):
+        sub = cu[cu["seg"] == seg]
+        for j, (col, nm, lo, hi) in enumerate(scores):
+            ax = axes[i, j]
+            edges = list(range(lo, hi + 30, 30)); labels = [f"{edges[k]}-{edges[k+1]}" for k in range(len(edges) - 1)]
+            s = pd.to_numeric(sub[col], errors="coerce")
+            b = pd.cut(s, bins=edges, labels=labels, include_lowest=True)
+            t = sub.assign(_b=b).groupby("_b", observed=False).agg(
+                n=("max_aod", "count"),
+                od1=("max_aod", lambda x: (x > 0).mean() * 100 if len(x) else 0),
+                od15=("max_aod", lambda x: (x >= 15).mean() * 100 if len(x) else 0)).reindex(labels)
+            x = np.arange(len(labels))
+            ax.bar(x, t["n"].fillna(0).values, color=BLUE, alpha=.35)
+            ax2 = ax.twinx()
+            ax2.plot(x, t["od1"].values, color=RED, marker="o", ms=3, lw=1.4)
+            ax2.plot(x, t["od15"].values, color=PURPLE, marker="s", ms=3, lw=1.4, ls="--")
+            ax2.set_ylim(0, 30)
+            ax.set_xticks(x); ax.set_xticklabels([l.split("-")[0] for l in labels], fontsize=6); ax.tick_params(labelsize=6)
+            ax2.tick_params(labelsize=6, colors=RED)
+            if i == 0: ax.set_title(nm, fontsize=11, fontweight="bold")
+            if j == 0: ax.set_ylabel(seg, fontsize=8, fontweight="bold")
+    leg = [Patch(facecolor=BLUE, alpha=.35, label="Харилцагч (тоо)"),
+           Line2D([0], [0], color=RED, marker="o", label="Хэтрэлт % (1+)"),
+           Line2D([0], [0], color=PURPLE, marker="s", ls="--", label="Хэтрэлт % (15+)")]
+    fig.legend(handles=leg, loc="upper center", ncol=3, fontsize=10, bbox_to_anchor=(0.5, 0.985))
+    fig.suptitle("Сегмент × онооны төрлөөр — онооны histogram, 1+ ба 15+ хэтрэлт %", fontsize=13, y=0.998)
+    fig.tight_layout(rect=[0, 0, 1, 0.965])
+    return _save(fig)
+
+
+def _add_six_segments(doc, S):
+    cu = S["_cust"].copy(); cu["seg"] = cu["ag"].astype(str) + " " + cu["g"].astype(str)
+    order = [s["name"] for s in S["segs"]]
+    buf = _seg_grid(cu, order)
+    sec = doc.add_section(WD_SECTION.NEW_PAGE); sec.orientation = WD_ORIENT.PORTRAIT
+    sec.page_width = Inches(8.5); sec.page_height = Inches(11)
+    sec.left_margin = Inches(0.8); sec.right_margin = Inches(0.8); sec.top_margin = Inches(0.8); sec.bottom_margin = Inches(0.8)
+    _H1(doc, "Хавсралт-3. 6 сегментийн хэтрэлтийн бүтэц ба онооны хамаарал")
+    rows = []
+    for seg in order:
+        a = cu[cu["seg"] == seg]["max_aod"]
+        rows.append([seg, _m(len(a)), f"{(a == 0).mean()*100:.1f}", f"{(a > 0).mean()*100:.1f}", f"{(a >= 15).mean()*100:.1f}", f"{(a > 30).mean()*100:.1f}"])
+    _TABLE(doc, [2640, 1140, 1440, 1080, 1080, 980], ["Сегмент", "n", "Хэтрээгүй %", "1+ %", "15+ %", "30+ %"], rows)
+    doc.add_paragraph().paragraph_format.space_after = Pt(4)
+    hi = S["seg_hi"]; lo = S["seg_lo"]
+    _BODY(doc, f"Дээрх хүснэгтэд харилцагчдыг нас, хүйсээр зургаан сегментэд хувааж, хэтрэлтийн бүтцийг (хэтрээгүй / 1+ / 15+ / 30+ хоног) харуулав. {hi['name']} сегмент бүх түвшинд хамгийн өндөр эрсдэлтэй (1+ хэтрэлт {hi['od']:.1f}%, 30+ {hi['p30']:.2f}%) бол {lo['name']} хамгийн бага ({lo['od']:.1f}%) байна.")
+    _IMG(doc, buf, w=6.8); _CAP(doc, "Зураг 9. Сегмент (мөр) × онооны төрөл (багана) — хэтрэлт % (1+) онооны бүсээр")
+    _BODY(doc, "Графикийн торноос харахад ихэнх сегментэд нийт болон санхүүгийн оноо нэмэгдэх тусам хэтрэлт буурах тод хандлага ажиглагдана. Сэтгэлзүйн онооны хувьд энэ хандлага сул буюу зарим сегментэд бараг хавтгай байгаа нь сэтгэлзүйн оноо хэтрэлтийг сул ялгадаг өмнөх дүгнэлттэй нийцэж байна.")
+
+
 # ── Тайлан угсрах ─────────────────────────────────────────────────────────────
 def build_report(S, src_name, outdir: Path) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
@@ -463,6 +569,7 @@ def build_report(S, src_name, outdir: Path) -> Path:
     _IMG(doc, C["band_psy"]); _CAP(doc, "Зураг 5. Сэтгэлзүйн онооны бүсээр — харилцагчийн тоо, хэтрэлт % (1+) ба 15+ хэтрэлт %")
     _BODY(doc, f"Гурван онооны ялгах чадварыг харьцуулбал нийт онооны хувьд хамгийн доод бүсэд ({tlo_b}) хэтрэлт {tlo:.1f}% байсан бол хамгийн дээд бүсэд ({thi_b}) {thi:.1f}% хүртэл буурч, {tspr:.1f} нэгж хувийн зөрүү гарч байна. Санхүүгийн оноо үүнтэй ойролцоо ({fspr:.1f}пп зөрүү) ялгах чадвартай бол сэтгэлзүйн оноо хамгийн сул ({pspr:.1f}пп) байна. Өөрөөр хэлбэл хэтрэлтийн эрсдэлийг таамаглахад санхүүгийн болон нийт оноо илүү мэдээлэл өгч байгаа бол сэтгэлзүйн оноо дангаараа сул ялгаатай байна. 15+ хоногийн хэтрэлтийн шугам (ягаан тасархай) нь нийт хэтрэлтийн шугамаас доогуур боловч ижил чиглэлд хөдөлж байгаа нь өндөр эрсдэлтэй хэтрэлт ч мөн оноо буурахад нэмэгддэгийг харуулна. Нийт оноо болон идэвхтэй хэтрэлтийн ерөнхий корреляц {S['corr']:+.3f} буюу сул сөрөг хэвээр байгаа нь оноог дангаар нь биш бусад үзүүлэлттэй хослуулан ашиглах шаардлагатайг дахин нотолж байна.")
 
+    _BODY(doc, f"Хэтрэлтийн босгыг өндөрсгөж үзэхэд +15 хоногийн хэтрэлттэй дансны хувьд нийт онооны корреляц {S['corr15']:+.3f} (n={S['corr15_n']:,}), +30 хоногийнх {S['corr30']:+.3f} (n={S['corr30_n']:,}) байгаа нь өндөр эрсдэлтэй хэтрэлтийн хувьд ч оноотой хамаарал сул хэвээр байгааг харуулна.")
     _BODY(doc, f"Энэ үеийн хувьд хэтрэлтийг хамгийн сайн ялгаж буй үзүүлэлт нь {_best_discriminator(tspr, fspr, pspr)} байгаа бол нийт оноо болон хэтрэлтийн ерөнхий хамаарал {_assess_corr(S['corr'])} ({S['corr']:+.3f}) түвшинд байна.")
 
     _H1(doc, "3. Хэтэрсэн ба хэтрээгүй бүлгийн харьцуулсан шинжилгээ")
@@ -507,6 +614,8 @@ def build_report(S, src_name, outdir: Path) -> Path:
     _BODY(doc, "Цаашид загварын ялгах чадварыг сайжруулахын тулд нас, хүйсээр ялгаатай эрсдэлийн загвар (segment-specific scoring), зан төлөвийн хувьсагчдын жинг нэмэгдүүлэх, мөн санхүүгийн болон сэтгэлзүйн скорингийн жинг оновчтой тохируулах боломжийг авч үзэхийг зөвлөж байна.")
 
     _add_corr_appendix(doc, S)
+    _add_group_profile(doc, S)
+    _add_six_segments(doc, S)
 
     out_path = outdir / f"loan_report_{dt.date.today().strftime('%Y-%m-%d')}.docx"
     doc.save(str(out_path))
