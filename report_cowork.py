@@ -494,6 +494,64 @@ def _add_six_segments(doc, S):
     _BODY(doc, "Графикийн торноос харахад ихэнх сегментэд нийт болон санхүүгийн оноо нэмэгдэх тусам хэтрэлт буурах тод хандлага ажиглагдана. Сэтгэлзүйн онооны хувьд энэ хандлага сул буюу зарим сегментэд бараг хавтгай байгаа нь сэтгэлзүйн оноо хэтрэлтийг сул ялгадаг өмнөх дүгнэлттэй нийцэж байна.")
 
 
+def _add_change_analysis(doc, S, src_name):
+    files = [f for f in glob.glob(str(ARCHIVE_DIR / "*.parquet")) if os.path.basename(f) != src_name]
+    if not files:
+        return
+    ppath = max(files, key=os.path.getmtime)
+    try:
+        dfp = pd.read_parquet(ppath)
+    except Exception:
+        return
+    if "max_active_overdue_day" not in dfp.columns or "cust_code" not in dfp.columns:
+        return
+    pname = os.path.basename(ppath).replace(".parquet", "")
+    def _bcu(df):
+        g = df.groupby("cust_code"); cu = g.agg(max_aod=("max_active_overdue_day", "max")).reset_index()
+        at = [c for c in ["age","gender","total_score","fin_score","psy_score","total_score_sr","slry_last_amt","slry_last_avg_6m","zms_active_ln_cnt","zms_monthly_payment","is_bio_login","has_ios","is_device_remember","mobile_no","slry_has_cont_salary_3m"] if c in df.columns]
+        return cu.merge(g[at].first().reset_index(), on="cust_code")
+    def _metrics(cu):
+        m = {}
+        m["Идэвхтэй хэтрэлт %"] = ((cu["max_aod"] > 0).mean() * 100, "pp")
+        m["30+ хоног хэтрэлт %"] = ((cu["max_aod"] > 30).mean() * 100, "pp")
+        for k, lab in [("total_score","Дундаж нийт оноо"),("fin_score","Санхүүгийн оноо"),("psy_score","Сэтгэлзүйн оноо"),("total_score_sr","Нийт оноо (SR)"),("slry_last_amt","Дундаж цалин"),("slry_last_avg_6m","6с дундаж цалин"),("zms_active_ln_cnt","ЗМС идэвхтэй зээл"),("zms_monthly_payment","ЗМС сарын төлбөр")]:
+            if k in cu.columns: m[lab] = (pd.to_numeric(cu[k], errors="coerce").mean(), "val")
+        for k, lab in [("is_bio_login","Биометр %"),("has_ios","iOS %"),("is_device_remember","Төхөөрөмж санасан %"),("mobile_no","88/99 утас %"),("slry_has_cont_salary_3m","Тасралтгүй цалин %"),("gender","Эрэгтэй %")]:
+            if k in cu.columns: m[lab] = (_b2n(cu[k]).mean() * 100, "pp")
+        return m
+    def _seg(cu):
+        c = cu.copy()
+        c["ag"] = pd.cut(pd.to_numeric(c["age"], errors="coerce"), bins=[0,29,45,200], labels=["17-29","30-45","46+"])
+        c["g"] = _b2n(c["gender"]).map({1.0:"Эрэгтэй",0.0:"Эмэгтэй"}); c["s"] = c["ag"].astype(str)+" "+c["g"].astype(str)
+        return {s:(c[c["s"]==s]["max_aod"]>0).mean()*100 for s in [f"{a} {gg}" for a in ["17-29","30-45","46+"] for gg in ["Эрэгтэй","Эмэгтэй"]] if (c["s"]==s).any()}
+    cur_cu = S["_cust"]; prev_cu = _bcu(dfp)
+    cm, pm = _metrics(cur_cu), _metrics(prev_cu); cs, ps = _seg(cur_cu), _seg(prev_cu)
+    mv = []
+    for lab,(cv,typ) in cm.items():
+        if lab in pm:
+            pv=pm[lab][0]; d=cv-pv; rel=abs(d)/abs(pv)*100 if pv else 0; mv.append((lab,pv,cv,d,typ,rel))
+    for s,cv in cs.items():
+        if s in ps:
+            pv=ps[s]; d=cv-pv; rel=abs(d)/abs(pv)*100 if pv else 0; mv.append((f"{s} сегментийн хэтрэлт",pv,cv,d,"pp",rel))
+    mv.sort(key=lambda r:r[5],reverse=True)
+    top=[r for r in mv if r[5]>=3][:5]; stable=[r for r in mv if r[5]<1.5]
+    sec=doc.add_section(WD_SECTION.NEW_PAGE); sec.orientation=WD_ORIENT.PORTRAIT
+    sec.page_width=Inches(8.5); sec.page_height=Inches(11)
+    sec.left_margin=Inches(1); sec.right_margin=Inches(1); sec.top_margin=Inches(1); sec.bottom_margin=Inches(1)
+    _H1(doc,"Динамик: өмнөх үетэй харьцуулсан хамгийн том өөрчлөлт")
+    _BODY(doc,f"Энэ хэсэг нь өмнөх үе ({pname})-тэй харьцуулж, хамгийн их өөрчлөгдсөн болон тогтвортой хэвээр байгаа шинж чанаруудыг өргөн хүрээнд автоматаар тодорхойлно.")
+    if top:
+        _BODY(doc,"Хамгийн их өөрчлөгдсөн шинж чанарууд:")
+        for lab,pv,cv,d,typ,rel in top:
+            unit="пп" if typ=="pp" else ""; ar="нэмэгдсэн" if d>0 else "буурсан"
+            fmt=(lambda v:f"{v:.1f}") if typ=="pp" else (lambda v:f"{v:,.1f}")
+            _BUL(doc,f"{lab}: {fmt(pv)} -> {fmt(cv)} ({d:+.1f}{unit}, {ar})")
+    else:
+        _BODY(doc,"Энэ үед томоохон өөрчлөлт ажиглагдсангүй.")
+    if stable:
+        _BODY(doc,f"Дараах шинж чанарууд бараг өөрчлөгдөөгүй, тогтвортой хэвээр байна: {', '.join(r[0] for r in stable[:8])}.")
+
+
 # ── Тайлан угсрах ─────────────────────────────────────────────────────────────
 def build_report(S, src_name, outdir: Path) -> Path:
     outdir.mkdir(parents=True, exist_ok=True)
@@ -613,6 +671,7 @@ def build_report(S, src_name, outdir: Path) -> Path:
     _BUL(doc, f"16-аас дээш хоногийн хэтрэлттэй дансууд (нийт {LONG} данс) өндөр эрсдэлийн бүс — тусгай хяналтад авах нь зүйтэй.")
     _BODY(doc, "Цаашид загварын ялгах чадварыг сайжруулахын тулд нас, хүйсээр ялгаатай эрсдэлийн загвар (segment-specific scoring), зан төлөвийн хувьсагчдын жинг нэмэгдүүлэх, мөн санхүүгийн болон сэтгэлзүйн скорингийн жинг оновчтой тохируулах боломжийг авч үзэхийг зөвлөж байна.")
 
+    _add_change_analysis(doc, S, src_name)
     _add_corr_appendix(doc, S)
     _add_group_profile(doc, S)
     _add_six_segments(doc, S)
